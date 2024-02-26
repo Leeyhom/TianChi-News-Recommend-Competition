@@ -18,6 +18,4 @@
 
 基于物品的协同过滤算法中考虑了对热门物品及活跃用户的惩罚，具体公式如下所示：
 
-$$
-    w_{i j}=\frac{\sum_{\operatorname{\text {u}\in N(i) \cap N(j)}} \frac{1}{\log 1+|N(u)|}}{|N(i)|^{1-\alpha}|N(j)|^{\alpha}}
-$$
+$$w_{i j}=\frac{\sum_{\operatorname{\text {u}\in N(i) \cap N(j)}} \frac{1}{\log 1+|N(u)|}}{|N(i)|^{1-\alpha}|N(j)|^{\alpha}}$$
