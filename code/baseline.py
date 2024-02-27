@@ -93,7 +93,7 @@ def get_all_click_df(data_path, offline=True):
     else:
         trn_click = pd.read_csv(data_path + "/train_click_log.csv")
         tst_click = pd.read_csv(data_path + "/testA_click_log.csv")
-        all_click = trn_click.append(tst_click)
+        all_click = trn_click._append(tst_click)
     all_click = all_click.drop_duplicates(
         (["user_id", "click_article_id", "click_timestamp"])
     )
