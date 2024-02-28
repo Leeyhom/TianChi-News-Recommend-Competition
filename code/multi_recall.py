@@ -298,10 +298,10 @@ def itemcf_sim(df, item_created_time_dict):
                 i2i_sim[i].setdefault(j, 0)
                 # 考虑多种因素的权重计算最终的文章之间的相似度
                 i2i_sim[i][j] += (
-                    loc_weight
-                    * click_time_weight
-                    * created_time_weight
-                    / math.log(len(item_time_list) + 1)
+                        loc_weight
+                        * click_time_weight
+                        * created_time_weight
+                        / math.log(len(item_time_list) + 1)
                 )
 
     i2i_sim_ = i2i_sim.copy()
@@ -361,9 +361,9 @@ def usercf_sim(all_click_df, user_activate_degree_dict):
                     continue
                 # 用户平均活跃度作为活跃度的权重，这里的式子也可以改善
                 activate_weight = (
-                    100
-                    * 0.5
-                    * (user_activate_degree_dict[u] + user_activate_degree_dict[v])
+                        100
+                        * 0.5
+                        * (user_activate_degree_dict[u] + user_activate_degree_dict[v])
                 )
                 u2u_sim[u][v] += activate_weight / math.log(len(user_time_list) + 1)
 
@@ -412,14 +412,14 @@ def embdding_sim(click_df, item_emb_df, save_path, topk):
     # 将向量检索的结果保存成原始id的对应关系
     item_sim_dict = collections.defaultdict(dict)
     for target_idx, sim_value_list, rele_idx_list in tqdm(
-        zip(range(len(item_emb_np)), sim, idx)
+            zip(range(len(item_emb_np)), sim, idx)
     ):
         target_raw_id = item_idx_2_rawid_dict[target_idx]
         # 从1开始是为了去掉商品本身, 所以最终获得的相似商品只有topk-1
         for rele_idx, sim_value in zip(rele_idx_list[1:], sim_value_list[1:]):
             rele_raw_id = item_idx_2_rawid_dict[rele_idx]
             item_sim_dict[target_raw_id][rele_raw_id] = (
-                item_sim_dict.get(target_raw_id, {}).get(rele_raw_id, 0) + sim_value
+                    item_sim_dict.get(target_raw_id, {}).get(rele_raw_id, 0) + sim_value
             )
 
     # 保存i2i相似度矩阵
@@ -437,6 +437,9 @@ def gen_data_set(data, negsample=0):
 
     train_set = []
     test_set = []
+
+    # 获取训练数据和测试数据
+    print("\n获取训练数据和测试数据...")
     for reviewerID, hist in tqdm(data.groupby("user_id")):
         pos_list = hist["click_article_id"].tolist()
 
@@ -490,6 +493,7 @@ def gen_model_input(train_set, user_profile, seq_max_len):
     train_seq = [line[1] for line in train_set]
     train_iid = np.array([line[2] for line in train_set])
     train_label = np.array([line[3] for line in train_set])
+
     train_hist_len = np.array([line[4] for line in train_set])
 
     train_seq_pad = pad_sequences(
@@ -533,7 +537,8 @@ def youtubednn_u2i_dict(data, save_path, topk=20):
 
     # 划分训练和测试集
     # 由于深度学习需要的数据量通常都是非常大的，所以为了保证召回的效果，往往会通过滑窗的形式扩充训练样本
-    train_set, test_set = gen_data_set(data, 0)
+    # 每一个正样本，对应5个负样本
+    train_set, test_set = gen_data_set(data, negsample=3)
     # 整理输入数据，具体的操作可以看上面的函数
     train_model_input, train_label = gen_model_input(train_set, user_profile, SEQ_LEN)
     test_model_input, test_label = gen_model_input(test_set, user_profile, SEQ_LEN)
@@ -593,7 +598,7 @@ def youtubednn_u2i_dict(data, save_path, topk=20):
         train_model_input,
         train_label,
         batch_size=256,
-        epochs=1,
+        epochs=5,
         verbose=1,
         validation_split=0.0,
     )
@@ -606,8 +611,8 @@ def youtubednn_u2i_dict(data, save_path, topk=20):
     item_embedding_model = Model(inputs=model.item_input, outputs=model.item_embedding)
 
     # 保存当前的item_embedding 和 user_embedding 排序的时候可能能够用到，但是需要注意保存的时候需要和原始的id对应
-    user_embs = user_embedding_model.predict(test_user_model_input, batch_size=2**12)
-    item_embs = item_embedding_model.predict(all_item_model_input, batch_size=2**12)
+    user_embs = user_embedding_model.predict(test_user_model_input, batch_size=2 ** 12)
+    item_embs = item_embedding_model.predict(all_item_model_input, batch_size=2 ** 12)
 
     # embedding保存之前归一化一下
     user_embs = user_embs / np.linalg.norm(user_embs, axis=1, keepdims=True)
@@ -637,15 +642,15 @@ def youtubednn_u2i_dict(data, save_path, topk=20):
 
     user_recall_items_dict = collections.defaultdict(dict)
     for target_idx, sim_value_list, rele_idx_list in tqdm(
-        zip(test_user_model_input["user_id"], sim, idx)
+            zip(test_user_model_input["user_id"], sim, idx)
     ):
         target_raw_id = user_index_2_rawid[target_idx]
         # 从1开始是为了去掉商品本身, 所以最终获得的相似商品只有topk-1
         for rele_idx, sim_value in zip(rele_idx_list[1:], sim_value_list[1:]):
             rele_raw_id = item_index_2_rawid[rele_idx]
             user_recall_items_dict[target_raw_id][rele_raw_id] = (
-                user_recall_items_dict.get(target_raw_id, {}).get(rele_raw_id, 0)
-                + sim_value
+                    user_recall_items_dict.get(target_raw_id, {}).get(rele_raw_id, 0)
+                    + sim_value
             )
 
     user_recall_items_dict = {
@@ -659,6 +664,75 @@ def youtubednn_u2i_dict(data, save_path, topk=20):
     # 可以直接对这个召回结果进行评估，为了方便可以统一写一个评估函数对所有的召回结果进行评估
     pickle.dump(user_recall_items_dict, open(save_path + "/youtube_u2i_dict.pkl", "wb"))
     return user_recall_items_dict
+
+
+# ----------------itemcf召回
+# 基于商品的召回i2i
+def item_based_recommend(
+        user_id,
+        user_item_time_dict,
+        i2i_sim,
+        sim_item_topk,
+        recall_item_num,
+        item_topk_click,
+        item_created_time_dict,
+        emb_i2i_sim,
+):
+    """
+    基于文章协同过滤的召回
+    :param user_id: 用户id
+    :param user_item_time_dict: 字典, 根据点击时间获取用户的点击文章序列   {user1: [(item1, time1), (item2, time2)..]...}
+    :param i2i_sim: 字典，文章相似性矩阵
+    :param sim_item_topk: 整数， 选择与当前文章最相似的前k篇文章
+    :param recall_item_num: 整数， 最后的召回文章数量
+    :param item_topk_click: 列表，点击次数最多的文章列表，用户召回补全
+    :param emb_i2i_sim: 字典基于内容embedding算的文章相似矩阵
+
+    :return: 召回的文章列表 [(item1, score1), (item2, score2)...]
+    """
+
+    # 获取用户历史交互的文章
+    user_hist_items = user_item_time_dict[user_id]
+    user_hist_items_ = {user_id for user_id, _ in user_hist_items}
+
+    item_rank = {}
+    for loc, (i, click_time) in enumerate(user_hist_items):
+        for j, wij in sorted(i2i_sim[i].items(), key=lambda x: x[1], reverse=True)[
+                      :sim_item_topk
+                      ]:
+            if j in user_hist_items_:
+                continue
+
+            # 文章创建时间差权重
+            created_time_weight = np.exp(
+                0.8 ** np.abs(item_created_time_dict[i] - item_created_time_dict[j])
+            )
+            # 相似文章和历史点击文章序列中历史文章所在的位置权重
+            loc_weight = 0.9 ** (len(user_hist_items) - loc)
+
+            content_weight = 1.0
+            if emb_i2i_sim.get(i, {}).get(j, None) is not None:
+                content_weight += emb_i2i_sim[i][j]
+            if emb_i2i_sim.get(j, {}).get(i, None) is not None:
+                content_weight += emb_i2i_sim[j][i]
+
+            item_rank.setdefault(j, 0)
+            item_rank[j] += created_time_weight * loc_weight * content_weight * wij
+
+    # 不足10个，用热门商品补全
+    if len(item_rank) < recall_item_num:
+        for i, item in enumerate(item_topk_click):
+            if item in item_rank.items():  # 填充的item应该不在原来的列表中
+                continue
+            item_rank[item] = -i - 100  # 随便给个负数就行
+            if len(item_rank) == recall_item_num:
+                break
+
+    item_rank = sorted(item_rank.items(), key=lambda x: x[1], reverse=True)[
+                :recall_item_num
+                ]
+
+    return item_rank
 
 
 if __name__ == "__main__":
@@ -716,6 +790,7 @@ if __name__ == "__main__":
     # )  # topk可以自行设置
 
     # 由于这里需要做召回评估，所以讲训练集中的最后一次点击都提取了出来
+    """
     if not metric_recall:
         user_multi_recall_dict["youtubednn_recall"] = youtubednn_u2i_dict(
             all_click_df, topk=20
@@ -729,3 +804,96 @@ if __name__ == "__main__":
         metrics_recall(
             user_multi_recall_dict["youtubednn_recall"], trn_last_click_df, topk=20
         )
+    """
+
+    # ---------------itemcf召回---------------------
+    # 先进行itemcf召回, 为了召回评估，所以提取最后一次点击
+
+    if metric_recall:
+        # 如果trn_hist_df, trn_last_click_df 为None
+        if trn_hist_click_df is None and trn_last_click_df is None:
+            trn_hist_click_df, trn_last_click_df = get_hist_and_last_click(all_click_df)
+    else:
+        trn_hist_click_df = all_click_df
+
+    user_recall_items_dict = collections.defaultdict(dict)
+    user_item_time_dict = get_user_item_time(trn_hist_click_df)
+
+    i2i_sim = pickle.load(open(save_path + "/itemcf_i2i_sim.pkl", "rb"))
+    emb_i2i_sim = pickle.load(open(save_path + "/emb_i2i_sim.pkl", "rb"))
+
+    sim_item_topk = 20
+    recall_item_num = 10
+    item_topk_click = get_item_topk_click(trn_hist_click_df, k=50)
+
+    # 对每个用户进行itemcf召回，其中考虑文章冷启动问题
+    print("\nItemCF recall start")
+    for user in tqdm(trn_hist_click_df["user_id"].unique()):
+        user_recall_items_dict[user] = item_based_recommend(
+            user,
+            user_item_time_dict,
+            i2i_sim,
+            sim_item_topk,
+            recall_item_num,
+            item_topk_click,
+            item_created_time_dict,
+            emb_i2i_sim,
+        )
+
+    user_multi_recall_dict["itemcf_sim_itemcf_recall"] = user_recall_items_dict
+    pickle.dump(
+        user_multi_recall_dict["itemcf_sim_itemcf_recall"],
+        open(save_path + "itemcf_recall_dict.pkl", "wb"),
+    )
+
+    if metric_recall:
+        # 召回效果评估
+        metrics_recall(
+            user_multi_recall_dict["itemcf_sim_itemcf_recall"],
+            trn_last_click_df,
+            topk=recall_item_num,
+        )
+
+    # ---------------embedding召回---------------------
+    # 这里是为了召回评估，所以提取最后一次点击
+    """
+    if metric_recall:
+        trn_hist_click_df, trn_last_click_df = get_hist_and_last_click(all_click_df)
+    else:
+        trn_hist_click_df = all_click_df
+
+    user_recall_items_dict = collections.defaultdict(dict)
+    user_item_time_dict = get_user_item_time(trn_hist_click_df)
+    i2i_sim = pickle.load(open(save_path + "emb_i2i_sim.pkl", "rb"))
+
+    sim_item_topk = 20
+    recall_item_num = 10
+
+    item_topk_click = get_item_topk_click(trn_hist_click_df, k=50)
+
+    for user in tqdm(trn_hist_click_df["user_id"].unique()):
+        user_recall_items_dict[user] = item_based_recommend(
+            user,
+            user_item_time_dict,
+            i2i_sim,
+            sim_item_topk,
+            recall_item_num,
+            item_topk_click,
+            item_created_time_dict,
+            emb_i2i_sim,
+        )
+
+    user_multi_recall_dict["embedding_sim_item_recall"] = user_recall_items_dict
+    pickle.dump(
+        user_multi_recall_dict["embedding_sim_item_recall"],
+        open(save_path + "embedding_sim_item_recall.pkl", "wb"),
+    )
+
+    if metric_recall:
+        # 召回效果评估
+        metrics_recall(
+            user_multi_recall_dict["embedding_sim_item_recall"],
+            trn_last_click_df,
+            topk=recall_item_num,
+        )
+    """
