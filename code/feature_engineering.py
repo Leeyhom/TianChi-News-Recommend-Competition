@@ -19,7 +19,7 @@ warnings.filterwarnings("ignore")
 def reduce_mem(df):
     starttime = time.time()
     numerics = ["int16", "int32", "int64", "float16", "float32", "float64"]
-    start_mem = df.memory_usage().sum() / 1024 ** 2
+    start_mem = df.memory_usage().sum() / 1024**2
     for col in df.columns:
         col_type = df[col].dtypes
         if col_type in numerics:
@@ -43,7 +43,7 @@ def reduce_mem(df):
                     df[col] = df[col].astype(np.float32)
                 else:
                     df[col] = df[col].astype(np.float64)
-    end_mem = df.memory_usage().sum() / 1024 ** 2
+    end_mem = df.memory_usage().sum() / 1024**2
     print(
         "-- Mem. usage decreased to {:5.2f} Mb ({:.1f}% reduction),time spend:{:2.2f} min".format(
             end_mem,
@@ -86,14 +86,9 @@ def get_hist_and_last_click(all_click):
     all_click = all_click.sort_values(by=["user_id", "click_timestamp"])
     click_last_df = all_click.groupby("user_id").tail(1)
 
-    # 如果用户只有一个点击，hist为空了，会导致训练的时候这个用户不可见，此时默认泄露一下
-    def hist_func(user_df):
-        if len(user_df) == 1:
-            return user_df
-        else:
-            return user_df[:-1]
+    click_hist_df = all_click.groupby("user_id").apply(lambda x: x[:-1]).reset_index(drop=True)
+    click_last_df = click_last_df[click_last_df["user_id"].isin(click_hist_df["user)id"])]
 
-    click_hist_df = all_click.groupby("user_id").apply(hist_func).reset_index(drop=True)
     return click_hist_df, click_last_df
 
 
@@ -101,6 +96,8 @@ def get_hist_and_last_click(all_click):
 def get_trn_val_tst_data(data_path, offline=True, sample_user_num=10000):
     if offline:
         click_trn_data = pd.read_csv(data_path + "/train_click_log.csv")
+        click_tst_data = pd.read_csv(data_path + "/testA_click_log.csv")
+        click_trn_data = click_trn_data._append(click_tst_data)
         click_trn_data = reduce_mem(click_trn_data)
         click_trn, click_val, val_ans = trn_val_spilt(click_trn_data, sample_user_num)
     else:
@@ -271,12 +268,12 @@ def get_rank_label_df(recall_list_df, label_df, is_test=False):
 
 
 def get_user_recall_item_label_df(
-        click_trn_hist,
-        click_val_hist,
-        click_tst_hist,
-        click_trn_last,
-        click_val_last,
-        recall_list_df,
+    click_trn_hist,
+    click_val_hist,
+    click_tst_hist,
+    click_trn_last,
+    click_val_last,
+    recall_list_df,
 ):
     # 获取训练数据的召回列表
     trn_user_items_df = recall_list_df[recall_list_df["user_id"].isin(click_trn_hist["user_id"].unique())]
@@ -313,13 +310,13 @@ def make_tuple_func(group_df):
 # 制作与用户历史行为相关的特征
 # 下面基于data做历史相关的特征
 def create_feature(
-        users_id,
-        recall_list,
-        click_hist_df,
-        articles_info,
-        articles_emb,
-        user_emb=None,
-        N=1,
+    users_id,
+    recall_list,
+    click_hist_df,
+    articles_info,
+    articles_emb,
+    user_emb=None,
+    N=1,
 ):
     """
     基于用户的历史行为做相关特征
@@ -420,10 +417,10 @@ def active_level(all_data, cols):
 
     # 两者归一化
     user_act["click_size"] = (user_act["click_size"] - user_act["click_size"].min()) / (
-            user_act["click_size"].max() - user_act["click_size"].min()
+        user_act["click_size"].max() - user_act["click_size"].min()
     )
     user_act["time_diff_mean"] = (user_act["time_diff_mean"] - user_act["time_diff_mean"].min()) / (
-            user_act["time_diff_mean"].max() - user_act["time_diff_mean"].min()
+        user_act["time_diff_mean"].max() - user_act["time_diff_mean"].min()
     )
     user_act["active_level"] = user_act["click_size"] + user_act["time_diff_mean"]
 
@@ -465,10 +462,10 @@ def hot_level(all_data, cols):
 
     # 两者归一化
     article_hot["user_num"] = (article_hot["user_num"] - article_hot["user_num"].min()) / (
-            article_hot["user_num"].max() - article_hot["user_num"].min()
+        article_hot["user_num"].max() - article_hot["user_num"].min()
     )
     article_hot["time_diff_mean"] = (article_hot["time_diff_mean"] - article_hot["time_diff_mean"].min()) / (
-            article_hot["time_diff_mean"].max() - article_hot["time_diff_mean"].min()
+        article_hot["time_diff_mean"].max() - article_hot["time_diff_mean"].min()
     )
     article_hot["hot_level"] = article_hot["user_num"] + article_hot["time_diff_mean"]
 

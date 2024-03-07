@@ -15,7 +15,7 @@ from tensorflow.python.keras.models import Model
 
 from deepctr.feature_column import SparseFeat, VarLenSparseFeat
 
-from keras.preprocessing.sequence import pad_sequences
+from keras.utils import pad_sequences
 
 from deepmatch.models import *
 from deepmatch.utils import sampledsoftmaxloss, NegativeSampler
@@ -40,9 +40,7 @@ def get_all_click_sample(data_path, sample_nums=10000):
     sample_user_ids = np.random.choice(all_user_ids, size=sample_nums, replace=False)
     all_click = all_click[all_click["user_id"].isin(sample_user_ids)]
 
-    all_click = all_click.drop_duplicates(
-        (["user_id", "click_article_id", "click_timestamp"])
-    )
+    all_click = all_click.drop_duplicates((["user_id", "click_article_id", "click_timestamp"]))
     return all_click
 
 
@@ -50,15 +48,13 @@ def get_all_click_sample(data_path, sample_nums=10000):
 # 如果是为了线下验证模型的有效性或者特征的有效性，可以只使用训练集
 def get_all_click_df(data_path="./data_raw/", offline=True):
     if offline:
-        all_click = pd.read_csv(data_path + "/train_click_log.csv")
-    else:
         trn_click = pd.read_csv(data_path + "/train_click_log.csv")
         tst_click = pd.read_csv(data_path + "/testA_click_log.csv")
         all_click = trn_click._append(tst_click)
+    else:
+        trn_click = pd.read_csv(data_path + "/train_click_log.csv")
 
-    all_click = all_click.drop_duplicates(
-        (["user_id", "click_article_id", "click_timestamp"])
-    )
+    all_click = all_click.drop_duplicates((["user_id", "click_article_id", "click_timestamp"]))
     return all_click
 
 
@@ -74,15 +70,20 @@ def get_item_info_df(data_path):
 
 # 读取文章的Embedding数据
 def get_item_emb_dict(data_path, save_path="../multi_recall_result/"):
-    item_emb_df = pd.read_csv(data_path + "/articles_emb.csv")
+    # 如果结果文件存在直接读取返回
+    if os.path.exists(save_path + "item_content_emb.pkl"):
+        item_emb_dict = pickle.load(open(save_path + "item_content_emb.pkl", "rb"))
+    else:
+        # 如果结果文件不存在，先从原始数据计算item_emb_dict并保存到文件
+        item_emb_df = pd.read_csv(data_path + "/articles_emb.csv")
 
-    item_emb_cols = [x for x in item_emb_df.columns if "emb" in x]
-    item_emb_np = np.ascontiguousarray(item_emb_df[item_emb_cols])
-    # 进行归一化
-    item_emb_np = item_emb_np / np.linalg.norm(item_emb_np, axis=1, keepdims=True)
+        item_emb_cols = [x for x in item_emb_df.columns if "emb" in x]
+        item_emb_np = np.ascontiguousarray(item_emb_df[item_emb_cols])
+        # 进行归一化
+        item_emb_np = item_emb_np / np.linalg.norm(item_emb_np, axis=1, keepdims=True)
 
-    item_emb_dict = dict(zip(item_emb_df["article_id"], item_emb_np))
-    pickle.dump(item_emb_dict, open(save_path + "item_content_emb.pkl", "wb"))
+        item_emb_dict = dict(zip(item_emb_df["article_id"], item_emb_np))
+        pickle.dump(item_emb_dict, open(save_path + "item_content_emb.pkl", "wb"))
 
     return item_emb_dict
 
@@ -102,9 +103,7 @@ def get_user_item_time(click_df):
         .reset_index()
         .rename(columns={0: "item_time_list"})
     )
-    user_item_time_dict = dict(
-        zip(user_item_time_df["user_id"], user_item_time_df["item_time_list"])
-    )
+    user_item_time_dict = dict(zip(user_item_time_df["user_id"], user_item_time_df["item_time_list"]))
 
     return user_item_time_dict
 
@@ -123,9 +122,7 @@ def get_item_user_time_dict(click_df):
         .rename(columns={0: "user_time_list"})
     )
 
-    item_user_time_dict = dict(
-        zip(item_user_time_df["click_article_id"], item_user_time_df["user_time_list"])
-    )
+    item_user_time_dict = dict(zip(item_user_time_df["click_article_id"], item_user_time_df["user_time_list"]))
     return item_user_time_dict
 
 
@@ -134,14 +131,13 @@ def get_hist_and_last_click(all_click):
     all_click = all_click.sort_values(by=["user_id", "click_timestamp"])
     click_last_df = all_click.groupby("user_id").tail(1)
 
-    # 如果用户只有一个点击，hist为空了，会导致训练的时候这个用户不可见，此时默认泄露一下
+    # 只保留点击次数大于2的用户的点击数据
     def hist_func(user_df):
-        if len(user_df) == 1:
-            return user_df
-        else:
-            return user_df[:-1]
+        return user_df[:-1]
 
     click_hist_df = all_click.groupby("user_id").apply(hist_func).reset_index(drop=True)
+    # 只保留有两次及以上点击的样本
+    click_last_df = click_last_df[click_last_df["user_id"].isin(click_hist_df["user_id"])]
 
     return click_hist_df, click_last_df
 
@@ -149,19 +145,11 @@ def get_hist_and_last_click(all_click):
 # 获取文章id对应的基本属性，保存成字典的形式，方便后面召回阶段，冷启动阶段直接使用
 def get_item_info_dict(item_info_df):
     max_min_scaler = lambda x: (x - np.min(x)) / (np.max(x) - np.min(x))
-    item_info_df["created_at_ts"] = item_info_df[["created_at_ts"]].apply(
-        max_min_scaler
-    )
+    item_info_df["created_at_ts"] = item_info_df[["created_at_ts"]].apply(max_min_scaler)
 
-    item_type_dict = dict(
-        zip(item_info_df["click_article_id"], item_info_df["category_id"])
-    )
-    item_words_dict = dict(
-        zip(item_info_df["click_article_id"], item_info_df["words_count"])
-    )
-    item_created_time_dict = dict(
-        zip(item_info_df["click_article_id"], item_info_df["created_at_ts"])
-    )
+    item_type_dict = dict(zip(item_info_df["click_article_id"], item_info_df["category_id"]))
+    item_words_dict = dict(zip(item_info_df["click_article_id"], item_info_df["words_count"]))
+    item_created_time_dict = dict(zip(item_info_df["click_article_id"], item_info_df["created_at_ts"]))
 
     return item_type_dict, item_words_dict, item_created_time_dict
 
@@ -169,17 +157,11 @@ def get_item_info_dict(item_info_df):
 # 获取用户历史点击的文章信息
 def get_user_hist_item_info_dict(all_click):
     # 获取user_id对应的用户历史点击文章类型的集合字典
-    user_hist_item_typs = (
-        all_click.groupby("user_id")["category_id"].agg(set).reset_index()
-    )
-    user_hist_item_typs_dict = dict(
-        zip(user_hist_item_typs["user_id"], user_hist_item_typs["category_id"])
-    )
+    user_hist_item_typs = all_click.groupby("user_id")["category_id"].agg(set).reset_index()
+    user_hist_item_typs_dict = dict(zip(user_hist_item_typs["user_id"], user_hist_item_typs["category_id"]))
 
     # 获取user_id对应的用户点击文章的集合
-    user_hist_item_ids_dict = (
-        all_click.groupby("user_id")["click_article_id"].agg(set).reset_index()
-    )
+    user_hist_item_ids_dict = all_click.groupby("user_id")["click_article_id"].agg(set).reset_index()
     user_hist_item_ids_dict = dict(
         zip(
             user_hist_item_ids_dict["user_id"],
@@ -188,25 +170,17 @@ def get_user_hist_item_info_dict(all_click):
     )
 
     # 获取user_id对应的用户历史点击的文章的平均字数字典
-    user_hist_item_words = (
-        all_click.groupby("user_id")["words_count"].agg("mean").reset_index()
-    )
-    user_hist_item_words_dict = dict(
-        zip(user_hist_item_words["user_id"], user_hist_item_words["words_count"])
-    )
+    user_hist_item_words = all_click.groupby("user_id")["words_count"].agg("mean").reset_index()
+    user_hist_item_words_dict = dict(zip(user_hist_item_words["user_id"], user_hist_item_words["words_count"]))
 
     # 获取user_id对应的用户最后一次点击的文章的创建时间
     all_click_ = all_click.sort_values("click_timestamp")
     user_last_item_created_time = (
-        all_click_.groupby("user_id")["created_at_ts"]
-        .apply(lambda x: x.iloc[-1])
-        .reset_index()
+        all_click_.groupby("user_id")["created_at_ts"].apply(lambda x: x.iloc[-1]).reset_index()
     )
 
     max_min_scaler = lambda x: (x - np.min(x)) / (np.max(x) - np.min(x))
-    user_last_item_created_time["created_at_ts"] = user_last_item_created_time[
-        ["created_at_ts"]
-    ].apply(max_min_scaler)
+    user_last_item_created_time["created_at_ts"] = user_last_item_created_time[["created_at_ts"]].apply(max_min_scaler)
 
     user_last_item_created_time_dict = dict(
         zip(
@@ -232,12 +206,10 @@ def get_item_topk_click(click_df, k):
 # ------------------------召回评估函数
 # 依次评估召回的前10, 20, 30, 40, 50个文章中的击中率
 def metrics_recall(user_recall_items_dict, trn_last_click_df, topk=5):
-    last_click_item_dict = dict(
-        zip(trn_last_click_df["user_id"], trn_last_click_df["click_article_id"])
-    )
+    last_click_item_dict = dict(zip(trn_last_click_df["user_id"], trn_last_click_df["click_article_id"]))
     user_num = len(user_recall_items_dict)
 
-    for k in range(10, topk + 1, 10):
+    for k in range(10, topk + 1, 5):
         hit_num = 0
         for user, item_list in user_recall_items_dict.items():
             # 获取前k个召回的结果
@@ -247,11 +219,7 @@ def metrics_recall(user_recall_items_dict, trn_last_click_df, topk=5):
 
         hit_rate = round(hit_num * 1.0 / user_num, 5)
 
-        print(
-            "topK: {}, hit_num: {}, hit_rate: {}, user_num: {}".format(
-                k, hit_num, hit_rate, user_num
-            )
-        )
+        print("topK: {}, hit_num: {}, hit_rate: {}, user_num: {}".format(k, hit_num, hit_rate, user_num))
 
 
 # ----------------------------计算相似性矩阵
@@ -267,6 +235,11 @@ def itemcf_sim(df, item_created_time_dict):
     :param item_created_time_dict: 文章创建时间的字典
     :return: 文章与文章的相似性矩阵
     """
+
+    # 如果已经计算过sim矩阵，直接读取
+    # if os.path.exists(save_path + "/itemcf_i2i_sim.pkl"):
+    #     i2i_sim = pickle.load(open(save_path + "/itemcf_i2i_sim.pkl", "rb"))
+    #     return i2i_sim
 
     user_item_time_dict = get_user_item_time(df)
 
@@ -292,16 +265,14 @@ def itemcf_sim(df, item_created_time_dict):
                 # 点击时间权重，其中的参数可以调节
                 click_time_weight = np.exp(0.7 ** np.abs(i_click_time - j_click_time))
                 # 两篇文章创建时间的权重，其中的参数可以调节
-                created_time_weight = np.exp(
-                    0.8 ** np.abs(item_created_time_dict[i] - item_created_time_dict[j])
-                )
+                created_time_weight = np.exp(0.8 ** np.abs(item_created_time_dict[i] - item_created_time_dict[j]))
                 i2i_sim[i].setdefault(j, 0)
                 # 考虑多种因素的权重计算最终的文章之间的相似度
                 i2i_sim[i][j] += (
-                        loc_weight
-                        * click_time_weight
-                        * created_time_weight
-                        / math.log(len(item_time_list) + 1)
+                    loc_weight
+                    * click_time_weight
+                    * created_time_weight
+                    / math.log(len(item_time_list) + 1)  # 对活跃用户进行惩罚
                 )
 
     i2i_sim_ = i2i_sim.copy()
@@ -320,18 +291,12 @@ def get_user_activate_degree_dict(all_click_df):
     """
     求用户活跃度
     """
-    all_click_df_ = (
-        all_click_df.groupby("user_id")["click_article_id"].count().reset_index()
-    )
+    all_click_df_ = all_click_df.groupby("user_id")["click_article_id"].count().reset_index()
 
     # 用户活跃度归一化
     mm = MinMaxScaler()
-    all_click_df_["click_article_id"] = mm.fit_transform(
-        all_click_df_[["click_article_id"]]
-    )
-    user_activate_degree_dict = dict(
-        zip(all_click_df_["user_id"], all_click_df_["click_article_id"])
-    )
+    all_click_df_["click_article_id"] = mm.fit_transform(all_click_df_[["click_article_id"]])
+    user_activate_degree_dict = dict(zip(all_click_df_["user_id"], all_click_df_["click_article_id"]))
 
     return user_activate_degree_dict
 
@@ -360,11 +325,7 @@ def usercf_sim(all_click_df, user_activate_degree_dict):
                 if u == v:
                     continue
                 # 用户平均活跃度作为活跃度的权重，这里的式子也可以改善
-                activate_weight = (
-                        100
-                        * 0.5
-                        * (user_activate_degree_dict[u] + user_activate_degree_dict[v])
-                )
+                activate_weight = 100 * 0.5 * (user_activate_degree_dict[u] + user_activate_degree_dict[v])
                 u2u_sim[u][v] += activate_weight / math.log(len(user_time_list) + 1)
 
     u2u_sim_ = u2u_sim.copy()
@@ -393,13 +354,16 @@ def embdding_sim(click_df, item_emb_df, save_path, topk):
     思路: 对于每一篇文章， 基于embedding的相似性返回topk个与其最相似的文章， 只不过由于文章数量太多，这里用了faiss进行加速
     """
 
+    # 如果结果路径存在直接读取
+    if os.path.exists(save_path + "/emb_i2i_sim.pkl"):
+        item_sim_dict = pickle.load(open(save_path + "/emb_i2i_sim.pkl", "rb"))
+        return item_sim_dict
+
     # 文章索引与文章id的字典映射
     item_idx_2_rawid_dict = dict(zip(item_emb_df.index, item_emb_df["article_id"]))
 
     item_emb_cols = [x for x in item_emb_df.columns if "emb" in x]
-    item_emb_np = np.ascontiguousarray(
-        item_emb_df[item_emb_cols].values, dtype=np.float32
-    )
+    item_emb_np = np.ascontiguousarray(item_emb_df[item_emb_cols].values, dtype=np.float32)
     # 向量进行单位化
     item_emb_np = item_emb_np / np.linalg.norm(item_emb_np, axis=1, keepdims=True)
 
@@ -411,15 +375,13 @@ def embdding_sim(click_df, item_emb_df, save_path, topk):
 
     # 将向量检索的结果保存成原始id的对应关系
     item_sim_dict = collections.defaultdict(dict)
-    for target_idx, sim_value_list, rele_idx_list in tqdm(
-            zip(range(len(item_emb_np)), sim, idx)
-    ):
+    for target_idx, sim_value_list, rele_idx_list in tqdm(zip(range(len(item_emb_np)), sim, idx)):
         target_raw_id = item_idx_2_rawid_dict[target_idx]
         # 从1开始是为了去掉商品本身, 所以最终获得的相似商品只有topk-1
         for rele_idx, sim_value in zip(rele_idx_list[1:], sim_value_list[1:]):
             rele_raw_id = item_idx_2_rawid_dict[rele_idx]
             item_sim_dict[target_raw_id][rele_raw_id] = (
-                    item_sim_dict.get(target_raw_id, {}).get(rele_raw_id, 0) + sim_value
+                item_sim_dict.get(target_raw_id, {}).get(rele_raw_id, 0) + sim_value
             )
 
     # 保存i2i相似度矩阵
@@ -444,9 +406,7 @@ def gen_data_set(data, negsample=0):
         pos_list = hist["click_article_id"].tolist()
 
         if negsample > 0:
-            candidate_set = list(
-                set(item_ids) - set(pos_list)
-            )  # 用户没看过的文章里面选择负样本
+            candidate_set = list(set(item_ids) - set(pos_list))  # 用户没看过的文章里面选择负样本
             neg_list = np.random.choice(
                 candidate_set, size=len(pos_list) * negsample, replace=True
             )  # 对于每个正样本，选择n个负样本
@@ -477,9 +437,7 @@ def gen_data_set(data, negsample=0):
                     )  # 负样本 [user_id, his_item, neg_item, label, len(his_item)]
             else:
                 # 将最长的那一个序列长度作为测试数据
-                test_set.append(
-                    (reviewerID, hist[::-1], pos_list[i], 1, len(hist[::-1]))
-                )
+                test_set.append((reviewerID, hist[::-1], pos_list[i], 1, len(hist[::-1])))
 
     random.shuffle(train_set)
     random.shuffle(test_set)
@@ -496,9 +454,7 @@ def gen_model_input(train_set, user_profile, seq_max_len):
 
     train_hist_len = np.array([line[4] for line in train_set])
 
-    train_seq_pad = pad_sequences(
-        train_seq, maxlen=seq_max_len, padding="post", truncating="post", value=0
-    )
+    train_seq_pad = pad_sequences(train_seq, maxlen=seq_max_len, padding="post", truncating="post", value=0)
     train_model_input = {
         "user_id": train_uid,
         "click_article_id": train_iid,
@@ -531,9 +487,7 @@ def youtubednn_u2i_dict(data, save_path, topk=20):
     item_profile = data[["click_article_id"]].drop_duplicates("click_article_id")
 
     user_index_2_rawid = dict(zip(user_profile["user_id"], user_profile_["user_id"]))
-    item_index_2_rawid = dict(
-        zip(item_profile["click_article_id"], item_profile_["click_article_id"])
-    )
+    item_index_2_rawid = dict(zip(item_profile["click_article_id"], item_profile_["click_article_id"]))
 
     # 划分训练和测试集
     # 由于深度学习需要的数据量通常都是非常大的，所以为了保证召回的效果，往往会通过滑窗的形式扩充训练样本
@@ -561,21 +515,13 @@ def youtubednn_u2i_dict(data, save_path, topk=20):
             "hist_len",
         ),
     ]
-    item_feature_columns = [
-        SparseFeat(
-            "click_article_id", feature_max_idx["click_article_id"], embedding_dim
-        )
-    ]
+    item_feature_columns = [SparseFeat("click_article_id", feature_max_idx["click_article_id"], embedding_dim)]
 
     # 模型的定义
     # num_sampled: 负采样时的样本数量
     train_counter = Counter(train_model_input["click_article_id"])
-    item_count = [
-        train_counter.get(i, 0) for i in range(item_feature_columns[0].vocabulary_size)
-    ]
-    sampler_config = NegativeSampler(
-        "frequency", num_sampled=5, item_name="click_article_id", item_count=item_count
-    )
+    item_count = [train_counter.get(i, 0) for i in range(item_feature_columns[0].vocabulary_size)]
+    sampler_config = NegativeSampler("frequency", num_sampled=5, item_name="click_article_id", item_count=item_count)
 
     import tensorflow as tf
 
@@ -611,21 +557,16 @@ def youtubednn_u2i_dict(data, save_path, topk=20):
     item_embedding_model = Model(inputs=model.item_input, outputs=model.item_embedding)
 
     # 保存当前的item_embedding 和 user_embedding 排序的时候可能能够用到，但是需要注意保存的时候需要和原始的id对应
-    user_embs = user_embedding_model.predict(test_user_model_input, batch_size=2 ** 12)
-    item_embs = item_embedding_model.predict(all_item_model_input, batch_size=2 ** 12)
+    user_embs = user_embedding_model.predict(test_user_model_input, batch_size=2**12)
+    item_embs = item_embedding_model.predict(all_item_model_input, batch_size=2**12)
 
     # embedding保存之前归一化一下
     user_embs = user_embs / np.linalg.norm(user_embs, axis=1, keepdims=True)
     item_embs = item_embs / np.linalg.norm(item_embs, axis=1, keepdims=True)
 
     # 将Embedding转换成字典的形式方便查询
-    raw_user_id_emb_dict = {
-        user_index_2_rawid[k]: v for k, v in zip(user_profile["user_id"], user_embs)
-    }
-    raw_item_id_emb_dict = {
-        item_index_2_rawid[k]: v
-        for k, v in zip(item_profile["click_article_id"], item_embs)
-    }
+    raw_user_id_emb_dict = {user_index_2_rawid[k]: v for k, v in zip(user_profile["user_id"], user_embs)}
+    raw_item_id_emb_dict = {item_index_2_rawid[k]: v for k, v in zip(item_profile["click_article_id"], item_embs)}
     # 将Embedding保存到本地
     pickle.dump(raw_user_id_emb_dict, open(save_path + "/user_youtube_emb.pkl", "wb"))
     pickle.dump(raw_item_id_emb_dict, open(save_path + "/item_youtube_emb.pkl", "wb"))
@@ -636,26 +577,20 @@ def youtubednn_u2i_dict(data, save_path, topk=20):
     #     faiss.normalize_L2(user_embs)
     #     faiss.normalize_L2(item_embs)
     index.add(item_embs)  # 将item向量构建索引
-    sim, idx = index.search(
-        np.ascontiguousarray(user_embs), topk
-    )  # 通过user去查询最相似的topk个item
+    sim, idx = index.search(np.ascontiguousarray(user_embs), topk)  # 通过user去查询最相似的topk个item
 
     user_recall_items_dict = collections.defaultdict(dict)
-    for target_idx, sim_value_list, rele_idx_list in tqdm(
-            zip(test_user_model_input["user_id"], sim, idx)
-    ):
+    for target_idx, sim_value_list, rele_idx_list in tqdm(zip(test_user_model_input["user_id"], sim, idx)):
         target_raw_id = user_index_2_rawid[target_idx]
         # 从1开始是为了去掉商品本身, 所以最终获得的相似商品只有topk-1
         for rele_idx, sim_value in zip(rele_idx_list[1:], sim_value_list[1:]):
             rele_raw_id = item_index_2_rawid[rele_idx]
             user_recall_items_dict[target_raw_id][rele_raw_id] = (
-                    user_recall_items_dict.get(target_raw_id, {}).get(rele_raw_id, 0)
-                    + sim_value
+                user_recall_items_dict.get(target_raw_id, {}).get(rele_raw_id, 0) + sim_value
             )
 
     user_recall_items_dict = {
-        k: sorted(v.items(), key=lambda x: x[1], reverse=True)
-        for k, v in user_recall_items_dict.items()
+        k: sorted(v.items(), key=lambda x: x[1], reverse=True) for k, v in user_recall_items_dict.items()
     }
     # 将召回的结果进行排序
 
@@ -669,14 +604,14 @@ def youtubednn_u2i_dict(data, save_path, topk=20):
 # ----------------itemcf召回
 # 基于商品的召回i2i
 def item_based_recommend(
-        user_id,
-        user_item_time_dict,
-        i2i_sim,
-        sim_item_topk,
-        recall_item_num,
-        item_topk_click,
-        item_created_time_dict,
-        emb_i2i_sim,
+    user_id,
+    user_item_time_dict,
+    i2i_sim,
+    sim_item_topk,
+    recall_item_num,
+    item_topk_click,
+    item_created_time_dict,
+    emb_i2i_sim,
 ):
     """
     基于文章协同过滤的召回
@@ -697,16 +632,12 @@ def item_based_recommend(
 
     item_rank = {}
     for loc, (i, click_time) in enumerate(user_hist_items):
-        for j, wij in sorted(i2i_sim[i].items(), key=lambda x: x[1], reverse=True)[
-                      :sim_item_topk
-                      ]:
+        for j, wij in sorted(i2i_sim[i].items(), key=lambda x: x[1], reverse=True)[:sim_item_topk]:
             if j in user_hist_items_:
                 continue
 
             # 文章创建时间差权重
-            created_time_weight = np.exp(
-                0.8 ** np.abs(item_created_time_dict[i] - item_created_time_dict[j])
-            )
+            created_time_weight = np.exp(0.8 ** np.abs(item_created_time_dict[i] - item_created_time_dict[j]))
             # 相似文章和历史点击文章序列中历史文章所在的位置权重
             loc_weight = 0.9 ** (len(user_hist_items) - loc)
 
@@ -719,7 +650,7 @@ def item_based_recommend(
             item_rank.setdefault(j, 0)
             item_rank[j] += created_time_weight * loc_weight * content_weight * wij
 
-    # 不足10个，用热门商品补全
+    # 不足召回数量，用热门商品补全
     if len(item_rank) < recall_item_num:
         for i, item in enumerate(item_topk_click):
             if item in item_rank.items():  # 填充的item应该不在原来的列表中
@@ -728,9 +659,7 @@ def item_based_recommend(
             if len(item_rank) == recall_item_num:
                 break
 
-    item_rank = sorted(item_rank.items(), key=lambda x: x[1], reverse=True)[
-                :recall_item_num
-                ]
+    item_rank = sorted(item_rank.items(), key=lambda x: x[1], reverse=True)[:recall_item_num]
 
     return item_rank
 
@@ -746,21 +675,17 @@ if __name__ == "__main__":
     # all_click_df = get_all_click_sample(data_path)
 
     # 全量训练集
-    all_click_df = get_all_click_df(data_path, offline=False)
+    all_click_df = get_all_click_df(data_path, offline=True)
 
     # 对时间戳进行归一化,用于在关联规则的时候计算权重
-    all_click_df["click_timestamp"] = all_click_df[["click_timestamp"]].apply(
-        max_min_scaler
-    )
+    all_click_df["click_timestamp"] = all_click_df[["click_timestamp"]].apply(max_min_scaler)
 
     item_info_df = get_item_info_df(data_path)
 
     item_emb_dict = get_item_emb_dict(data_path)
 
     # 获取文章的属性信息，保存成字典的形式方便查询
-    item_type_dict, item_words_dict, item_created_time_dict = get_item_info_dict(
-        item_info_df
-    )
+    item_type_dict, item_words_dict, item_created_time_dict = get_item_info_dict(item_info_df)
 
     # 定义一个多路召回字典，将各路召回的结果都保存在这个字典当中
     user_multi_recall_dict = {
@@ -776,18 +701,16 @@ if __name__ == "__main__":
     trn_hist_click_df, trn_last_click_df = get_hist_and_last_click(all_click_df)
 
     # 创建文章相似度矩阵并储存
-    # i2i_sim = itemcf_sim(all_click_df, item_created_time_dict)
+    i2i_sim = itemcf_sim(trn_hist_click_df, item_created_time_dict)
 
     # 由于usercf计算时候太耗费内存了，这里就不直接运行了
     # 如果是采样的话，是可以运行的
-    user_activate_degree_dict = get_user_activate_degree_dict(all_click_df)
+    # user_activate_degree_dict = get_user_activate_degree_dict(all_click_df)
     # u2u_sim = usercf_sim(all_click_df, user_activate_degree_dict)
 
     # 使用faiss根据embedding求相似度
-    # item_emb_df = pd.read_csv(data_path + "/articles_emb.csv")
-    # emb_i2i_sim = embdding_sim(
-    #     all_click_df, item_emb_df, save_path, topk=10
-    # )  # topk可以自行设置
+    item_emb_df = pd.read_csv(data_path + "/articles_emb.csv")
+    emb_i2i_sim = embdding_sim(all_click_df, item_emb_df, save_path, topk=10)  # topk可以自行设置
 
     # 由于这里需要做召回评估，所以讲训练集中的最后一次点击都提取了出来
     """
@@ -809,12 +732,8 @@ if __name__ == "__main__":
     # ---------------itemcf召回---------------------
     # 先进行itemcf召回, 为了召回评估，所以提取最后一次点击
 
-    if metric_recall:
-        # 如果trn_hist_df, trn_last_click_df 为None
-        if trn_hist_click_df is None and trn_last_click_df is None:
-            trn_hist_click_df, trn_last_click_df = get_hist_and_last_click(all_click_df)
-    else:
-        trn_hist_click_df = all_click_df
+    if metric_recall and trn_hist_click_df is None and trn_last_click_df is None:
+        trn_hist_click_df, trn_last_click_df = get_hist_and_last_click(all_click_df)
 
     user_recall_items_dict = collections.defaultdict(dict)
     user_item_time_dict = get_user_item_time(trn_hist_click_df)
@@ -822,9 +741,9 @@ if __name__ == "__main__":
     i2i_sim = pickle.load(open(save_path + "/itemcf_i2i_sim.pkl", "rb"))
     emb_i2i_sim = pickle.load(open(save_path + "/emb_i2i_sim.pkl", "rb"))
 
-    sim_item_topk = 20
-    recall_item_num = 10
-    item_topk_click = get_item_topk_click(trn_hist_click_df, k=50)
+    sim_item_topk = 25
+    recall_item_num = 25
+    item_topk_click = get_item_topk_click(all_click_df, k=50)
 
     # 对每个用户进行itemcf召回，其中考虑文章冷启动问题
     print("\nItemCF recall start")
